@@ -5,32 +5,10 @@ from torch.utils.data import TensorDataset, DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from model_freq import FreqDomainCNN
+from model_time import AutoregressiveGRU
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-class AutoregressiveGRU(nn.Module):
-    def __init__(self, input_size=16, hidden_size=64, output_size=15):
-        super(AutoregressiveGRU, self).__init__()
-        # 입력 차원을 input_size로 유지 (외부에서 15+1=16으로 맞춤)
-        self.gru = nn.GRU(input_size, hidden_size, num_layers=1, batch_first=True)
-        self.fc = nn.Linear(hidden_size, output_size)
-
-    # T_c 개의 블록 sequence를 받아서 hidden state 반환(예측값이 아닌 실제 값만을 이용)
-    def forward_context(self, context_x):
-        batch_size, T_c, _ = context_x.shape
-        alpha_zero = torch.zeros(batch_size, T_c, 1).to(device)
-        gru_in = torch.cat([context_x, alpha_zero], dim=-1)
-        _, hidden = self.gru(gru_in)
-        return hidden
-
-    # 과거 예측값에서 추출한 hidden state, 현재 입력값, alpha_value를 받아서 다음 블록 예측
-    def forward_predict_step(self, prev_x, alpha_value, hidden):
-        batch_size = prev_x.shape[0]
-        alpha_tensor = torch.full((batch_size, 1, 1), alpha_value).to(device)
-        gru_in = torch.cat([prev_x.unsqueeze(1), alpha_tensor], dim=-1)
-        out, hidden = self.gru(gru_in, hidden)
-        pred_x = self.fc(out.squeeze(1))
-        return pred_x, hidden
     
 def load_dataset(file_path, batch_size=64):
     data = torch.load(file_path)
@@ -49,7 +27,7 @@ def load_dataset(file_path, batch_size=64):
     # 학습 데이터로더만 셔플 적용
     return DataLoader(train_ds, batch_size=batch_size, shuffle=True), test_ds, gain_mean, gain_std
 
-def train(model, train_loader, epochs=100, K=5, eta=0.7):
+def train_time(model, train_loader, epochs=100, K=5, eta=0.7):
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     denom = sum(eta**i for i in range(K))
 
@@ -81,7 +59,7 @@ def train(model, train_loader, epochs=100, K=5, eta=0.7):
             print(f"Epoch [{epoch+1}/{epochs}], Weighted Loss: {running_loss/len(train_loader):.6f}")
     return model
 
-def evaluate(model, test_dataset, gain_mean, gain_std, K=5, target_delta=1):
+def evaluate_time(model, test_dataset, gain_mean, gain_std, K=5, target_delta=1):
     model.eval()
     evms_db = []
     
@@ -128,40 +106,108 @@ def evaluate(model, test_dataset, gain_mean, gain_std, K=5, target_delta=1):
                     
     return np.array(evms_db)
 
+def train_freq(model, train_loader, gain_mean, gain_std, epochs=100, K=5, eta=0.7):
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    denom = sum(eta**i for i in range(K))
+
+    model.train()
+    for epoch in range(epochs):
+        running_loss = 0.0
+        for batch_x, batch_y in train_loader:
+            optimizer.zero_grad()
+            
+            # 모델이 K개의 미래 블록을 한 번에 예측 (One-shot)
+            pred_y = model(batch_x, gain_mean, gain_std)  # pred_y shape: [B, K, 15]
+            
+            # 시간 가중치(eta)를 적용한 Loss 계산 (기존 아이디어 유지)
+            batch_loss = 0.0
+            for delta in range(K):
+                step_mse = torch.mean((pred_y[:, delta, :] - batch_y[:, delta, :]) ** 2)
+                batch_loss += (eta ** delta) * step_mse
+                
+            batch_loss = batch_loss / denom
+            batch_loss.backward()
+            optimizer.step()
+            running_loss += batch_loss.item()
+            
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch [{epoch+1}/{epochs}], Weighted Loss: {running_loss/len(train_loader):.6f}")
+    return model
+
+def evaluate_freq(model, test_dataset, gain_mean, gain_std, target_delta=1):
+    model.eval()
+    evms_db = []
+    
+    with torch.no_grad():
+        for i in range(len(test_dataset)):
+            X_seq, Y_seq = test_dataset[i]
+            X_seq = X_seq.unsqueeze(0)  # [1, T_c, 15]
+            
+            # 한 번의 통과로 K개 스텝 전체 예측
+            pred_y_all = model(X_seq, gain_mean, gain_std)
+            
+            # 원하는 미래 시점의 블록 추출 (delta=1 이면 T+2 블록)
+            pred_block = pred_y_all[0, target_delta, :]
+            target_block = Y_seq[target_delta] 
+            
+            for s in range(5):
+                pred_g, pred_c, pred_s = pred_block[s], pred_block[5+s], pred_block[10+s]
+                true_g, true_c, true_s = target_block[s], target_block[5+s], target_block[10+s]
+                
+                # 1. Gain 정규화 해제 (Denormalization)
+                pred_g_denorm = (pred_g * gain_std) + gain_mean
+                true_g_denorm = (true_g * gain_std) + gain_mean
+                
+                # 2. Phase 단위원 보정 (Normalization)
+                phase_mag = torch.sqrt(pred_c**2 + pred_s**2) + 1e-8
+                pred_c_norm = pred_c / phase_mag
+                pred_s_norm = pred_s / phase_mag
+                
+                # 3. 복소수 복원
+                pred_complex = pred_g_denorm * torch.complex(pred_c_norm, pred_s_norm)
+                true_complex = true_g_denorm * torch.complex(true_c, true_s) 
+                
+                error_p = torch.abs(pred_complex - true_complex) ** 2
+                true_p = torch.abs(true_complex) ** 2
+                
+                if true_p > 1e-12:
+                    evm_linear = (error_p / true_p).item() 
+                    evms_db.append(10 * np.log10(evm_linear))
+                    
+    return np.array(evms_db)
+
 if __name__ == "__main__":
     # 데이터셋 존재 여부 확인
-    if not os.path.exists("datasets/csi_2_2GHz.pt") or not os.path.exists("datasets/csi_7_4GHz.pt"):
+    if not os.path.exists("datasets/csi_7_4GHz.pt"):
         print("🚨 데이터셋이 존재하지 않습니다. 먼저 generate_data 코드를 실행해주세요.")
         exit()
-
-    # 2.2 GHz 대역
-    print("--- 2.2 GHz 대역 학습 ---")
-    loader_2, test_2, mean_2, std_2 = load_dataset("datasets/csi_2_2GHz.pt")
-    model_2 = AutoregressiveGRU().to(device)
-    model_2 = train(model_2, loader_2)
-    # T+2(delta=1) 미래 예측 EVM 측정
-    evms_2 = evaluate(model_2, test_2, mean_2, std_2, K=5, target_delta=1)
     
-    # 7.4 GHz 대역
-    print("\n--- 7.4 GHz 대역 학습 ---")
-    loader_7, test_7, mean_7, std_7 = load_dataset("datasets/csi_7_4GHz.pt")
-    model_7 = AutoregressiveGRU().to(device)
-    model_7 = train(model_7, loader_7)
+    # time domain
+    print("\n--- Time domain 학습 ---")
+    loader, test, mean, std = load_dataset("datasets/csi_7_4GHz.pt")
+    model_t = AutoregressiveGRU().to(device)
+    model_t = train_time(model_t, loader)
     # T+2(delta=1) 미래 예측 EVM 측정
-    evms_7 = evaluate(model_7, test_7, mean_7, std_7, K=5, target_delta=1)
+    evms_t = evaluate_time(model_t, test, mean, std, K=5, target_delta=1)
+
+    #frequency domain
+    print("\n--- Frequency domain 학습 ---")
+    model_f = FreqDomainCNN(K=5).to(device)
+    model_f = train_freq(model_f, loader, mean, std)
+    evms_f = evaluate_freq(model_f, test, mean, std, target_delta=1)
     
     # CDF 플롯 출력
     plt.figure(figsize=(7, 5))
-    for evm, label, color, style in [(evms_2, '2.2 GHz', 'blue', '-'), (evms_7, '7.4 GHz', 'red', '--')]:
+    for evm, label, color, style in [(evms_t, 'Time domain', 'red', '--'), (evms_f, 'Frequency Domain', 'blue', '-')]:
         xs = np.sort(evm)
         ys = np.arange(1, len(xs) + 1) / len(xs)
         plt.plot(xs, ys, label=label, color=color, linestyle=style, linewidth=2)
         
     plt.xlabel('EVM (dB)')
     plt.ylabel('Empirical CDF')
-    plt.title('True Paper Spec AR-GRU Prediction (Denormalized)')
+    plt.title('Time domain vs Frequency domain')
     plt.xlim([-30, 10])
     plt.grid(True, linestyle='--')
     plt.legend()
-    plt.savefig("true_paper_result_corrected.png", dpi=300)
-    print("\n🎉 'true_paper_result_corrected.png' 그래프 저장 완료!")
+    plt.savefig("Time domain vs Frequency domain.png", dpi=300)
+    print("\n🎉 'Time domain vs Frequency domain.png' 그래프 저장 완료!")
