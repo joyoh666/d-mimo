@@ -18,7 +18,7 @@ class AutoregressiveGRU(nn.Module):
         _, hidden = self.gru(gru_in)
         return hidden
 
-    # 과거 예측값에서 추출한 hidden state, 현재 입력값, alpha_value를 받아서 다음 블록 예측
+    # 과거 예측값에서 추출한 hidden state, 현재 입력값, alpha_value를 받아서 다음 블록 예측 + 예측값이 다시 입력으로 들어가는 형태로 K번 반복
     def forward_predict_step(self, prev_x, alpha_value, hidden):
         batch_size = prev_x.shape[0]
         alpha_tensor = torch.full((batch_size, 1, 1), alpha_value).to(device)

@@ -9,13 +9,13 @@ def generate_data(carrier_freq_hz, num_samples=3000):
     tdl_model = TDL(model="A", delay_spread=30e-9, carrier_frequency=carrier_freq_hz,
                     min_speed=0.5, max_speed=0.5, num_rx_ant=1, num_tx_ant=total_tx_ants)
     
-    sampling_freq = 1 / 0.005 # 5ms 간격
+    sampling_freq = 1 / 0.003 # 1ms 간격
     h_complex, _ = tdl_model(batch_size=1, num_time_steps=num_samples, sampling_frequency=sampling_freq)
     
     L_p = 5 
     num_blocks = num_samples // L_p
     X_sequences, Y_sequences = [], []
-    T_c = 10  
+    T_c = 10
     K = 5     
     
     all_tokens = [] # 정규화를 위해 일단 모든 토큰을 모읍니다.
