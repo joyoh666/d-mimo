@@ -9,7 +9,7 @@ def generate_data(carrier_freq_hz, num_samples=3000):
     tdl_model = TDL(model="A", delay_spread=30e-9, carrier_frequency=carrier_freq_hz,
                     min_speed=0.5, max_speed=0.5, num_rx_ant=1, num_tx_ant=total_tx_ants)
     
-    sampling_freq = 1 / 0.003 # 1ms 간격
+    sampling_freq = 1 / 0.005 # 1ms 간격
     h_complex, _ = tdl_model(batch_size=1, num_time_steps=num_samples, sampling_frequency=sampling_freq)
     
     L_p = 5 
