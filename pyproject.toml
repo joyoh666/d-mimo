@@ -3,9 +3,13 @@ name = "d-mimo"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 dependencies = [
+    "d>=0.2.2",
+    "matplotlib>=3.7",
+    "numpy>=1.24",
     "pandas>=2.3.3",
+    "scipy>=1.10",
     "sionna>=0.19.2",
     "torch>=2.8.0",
 ]
