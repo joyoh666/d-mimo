@@ -22,7 +22,7 @@ class SoundingConfig:
     # 5 ms CSI sampling period: 1.92 MS/s * 5 ms = 9,600 samples.
     pilot_period_s: float = 5e-3
 
-    # The paper averages three consecutive pilot symbols per CSI estimate.
+    # The paper averages three consecutive pilot symbols per CSI estimate. (동일한 파일럿 3번 전송해서 평균을 취하면 잡음 전력이 1/3로 줄어듦)
     pilot_repetitions: int = 3
 
     # Simulation assumptions not specified in the manuscript.
