@@ -307,6 +307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     uhd = import_uhd()
     print("Opening UHD MultiUSRP...")
     usrp = uhd.usrp.MultiUSRP(runtime.device_args)
+    
     configure_references(usrp, uhd, runtime)
     configure_frontends(usrp, sounding, runtime)
     validate_achieved_rates(usrp, sounding, runtime)
@@ -317,6 +318,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         usrp.send_waveform(
             frame,
             duration_s,
+
             runtime.center_frequency_hz,
             sounding.sample_rate_hz,
             list(runtime.channels),

@@ -1,0 +1,195 @@
+{
+  "config": {
+    "bandwidths_mhz": [
+      1.4,
+      5.0,
+      9.0,
+      15.0
+    ],
+    "carrier_frequency_hz": 2200000000.0,
+    "delay_spread_s": 3.0000000000000004e-08,
+    "speed_mps": 0.5,
+    "snr_db": 30.0,
+    "windows": 48,
+    "samples_per_window": 100,
+    "samples_per_step": 5,
+    "csi_period_s": 0.005,
+    "tdl_batch_size": 24,
+    "train_fraction": 0.8,
+    "val_fraction": 0.1,
+    "seed": 123,
+    "hidden_size": 64,
+    "num_layers": 1,
+    "dropout": 0.0,
+    "gain_scale": 20.0,
+    "eps_norm": 1e-06,
+    "pred_steps": 5,
+    "loss_gamma": 0.5,
+    "max_age_feature": 32,
+    "batch_size": 256,
+    "epochs": 10,
+    "learning_rate": 0.002,
+    "weight_decay": 0.0001,
+    "grad_clip": 1.0,
+    "patience": 5,
+    "min_epochs": 5
+  },
+  "results": [
+    {
+      "bandwidth_mhz": 1.4,
+      "best_epoch": 10,
+      "val_nmse": 1.0188818061697609,
+      "val_nmse_db": 0.08123807259188147,
+      "train_windows": 38,
+      "val_windows": 4,
+      "test_windows": 6,
+      "token_mse": 0.5836594901379244,
+      "nmse": 0.98623818262126,
+      "nmse_db": -0.060181875879733115,
+      "per_step_nmse": [
+        0.7543705338476241,
+        1.0231134972233575,
+        1.3419427147094352,
+        1.6380819631736856,
+        1.8548813963834276
+      ],
+      "per_step_nmse_db": [
+        -1.2241528373481263,
+        0.0992381404813171,
+        1.2773397692343993,
+        2.1433562835449145,
+        2.683161454642991
+      ],
+      "persistence_nmse": 0.529868937823494,
+      "persistence_nmse_db": -2.7583153911419753,
+      "persistence_per_step_nmse": [
+        0.14379712126589259,
+        0.5327097411248759,
+        1.098182553361175,
+        1.7419584909634724,
+        2.325167100608031
+      ],
+      "sequences": 540,
+      "t0_per_sequence": 15,
+      "delta_nmse_db_vs_reference": 0.0,
+      "degradation_class": "small_or_none"
+    },
+    {
+      "bandwidth_mhz": 5.0,
+      "best_epoch": 10,
+      "val_nmse": 1.0341209394195574,
+      "val_nmse_db": 0.14571332037578782,
+      "train_windows": 38,
+      "val_windows": 4,
+      "test_windows": 6,
+      "token_mse": 0.5935954167872299,
+      "nmse": 0.9869907845985512,
+      "nmse_db": -0.056869022611451214,
+      "per_step_nmse": [
+        0.7576956151788061,
+        1.0243876833798615,
+        1.3397759756993648,
+        1.625053427928159,
+        1.830463880336646
+      ],
+      "per_step_nmse_db": [
+        -1.205052260264838,
+        0.10464348132668418,
+        1.270321859384802,
+        2.1086764412900845,
+        2.6256116357797072
+      ],
+      "persistence_nmse": 0.5349114235688296,
+      "persistence_nmse_db": -2.717181272126099,
+      "persistence_per_step_nmse": [
+        0.14560845182697582,
+        0.5388022739008673,
+        1.1060440656279442,
+        1.7478263748451572,
+        2.335519885131754
+      ],
+      "sequences": 540,
+      "t0_per_sequence": 15,
+      "delta_nmse_db_vs_reference": 0.003312853268281901,
+      "degradation_class": "small_or_none"
+    },
+    {
+      "bandwidth_mhz": 9.0,
+      "best_epoch": 10,
+      "val_nmse": 0.9959216332186647,
+      "val_nmse_db": -0.01774833865158855,
+      "train_windows": 38,
+      "val_windows": 4,
+      "test_windows": 6,
+      "token_mse": 0.5924008035542052,
+      "nmse": 0.9886103590854524,
+      "nmse_db": -0.049748431266290645,
+      "per_step_nmse": [
+        0.7654707680505568,
+        1.0310694644531966,
+        1.3329681891320893,
+        1.5860786096845494,
+        1.7575503577469642
+      ],
+      "per_step_nmse_db": [
+        -1.160713895728269,
+        0.13287925237405745,
+        1.248197852358805,
+        2.0032470814311583,
+        2.4490777737795613
+      ],
+      "persistence_nmse": 0.550954295419024,
+      "persistence_nmse_db": -2.588844266846814,
+      "persistence_per_step_nmse": [
+        0.15014387619745995,
+        0.556121877425388,
+        1.1349425443681949,
+        1.779158126238793,
+        2.368012229847978
+      ],
+      "sequences": 540,
+      "t0_per_sequence": 15,
+      "delta_nmse_db_vs_reference": 0.01043344461344247,
+      "degradation_class": "small_or_none"
+    },
+    {
+      "bandwidth_mhz": 15.0,
+      "best_epoch": 10,
+      "val_nmse": 0.9483112364659974,
+      "val_nmse_db": -0.23049103488772554,
+      "train_windows": 38,
+      "val_windows": 4,
+      "test_windows": 6,
+      "token_mse": 0.6150343997154707,
+      "nmse": 0.9796131709054055,
+      "nmse_db": -0.08945384415957618,
+      "per_step_nmse": [
+        0.7408315366536888,
+        1.0106812928208688,
+        1.3370978095860975,
+        1.6438807167972918,
+        1.8754202624290919
+      ],
+      "per_step_nmse_db": [
+        -1.302805383359059,
+        0.04614227212747046,
+        1.261631773516094,
+        2.1587030108956955,
+        2.730986039049173
+      ],
+      "persistence_nmse": 0.5663413187649482,
+      "persistence_nmse_db": -2.4692175224066477,
+      "persistence_per_step_nmse": [
+        0.15413793867857745,
+        0.5714854184840225,
+        1.1622183924830185,
+        1.813106179163542,
+        2.405963458675387
+      ],
+      "sequences": 540,
+      "t0_per_sequence": 15,
+      "delta_nmse_db_vs_reference": -0.02927196827984306,
+      "degradation_class": "small_or_none"
+    }
+  ]
+}
