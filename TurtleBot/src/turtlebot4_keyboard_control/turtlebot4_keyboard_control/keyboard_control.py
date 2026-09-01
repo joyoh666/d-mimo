@@ -8,8 +8,13 @@ from geometry_msgs.msg import Twist, TwistStamped
 import rclpy
 from rclpy.node import Node
 
-from .key_input import TerminalKeyboard
-from .motion import Motion, motion_for_key, STOP
+if __package__:
+    from .key_input import TerminalKeyboard
+    from .motion import Motion, STOP, motion_for_key
+else:
+    # Support ``python keyboard_control.py`` during quick robot-side checks.
+    from key_input import TerminalKeyboard
+    from motion import Motion, STOP, motion_for_key
 
 
 HELP_TEXT = """

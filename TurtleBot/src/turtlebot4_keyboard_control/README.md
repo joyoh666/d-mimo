@@ -24,6 +24,13 @@ colcon build --symlink-install
 source install/setup.bash
 ```
 
+The final `source` command is required in every new terminal. Confirm the
+Python import path before running a node:
+
+```bash
+python3 -c "import rclpy, turtlebot4_keyboard_control; print('imports OK')"
+```
+
 ## Check robot connectivity
 
 The PC and TurtleBot must use the same ROS distribution, DDS implementation,
@@ -42,6 +49,13 @@ Run the node in an interactive WSL, Ubuntu, or SSH terminal:
 
 ```bash
 ros2 run turtlebot4_keyboard_control keyboard_control
+```
+
+After the workspace has been sourced, the equivalent Python package command is
+also available:
+
+```bash
+python3 -m turtlebot4_keyboard_control
 ```
 
 Use lower speeds for the first physical test:
@@ -92,3 +106,13 @@ ros2 run turtlebot4_keyboard_control keyboard_control --ros-args \
 
 Do not redirect standard input. Arrow keys are read directly from the active
 terminal. Keep the robot in sight and keep a hand ready on Space.
+
+## Lightring button example
+
+The former standalone `TurtleBot/test.py` example is installed as a regular
+ROS node, so its `irobot_create_msgs` dependency and Python import path are
+handled by `rosdep` and `colcon`:
+
+```bash
+ros2 run turtlebot4_keyboard_control lightring_control
+```

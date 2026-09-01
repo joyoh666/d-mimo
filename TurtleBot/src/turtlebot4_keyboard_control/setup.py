@@ -16,7 +16,6 @@ setup(
         ('share/' + package_name, ['package.xml', 'README.md']),
     ],
     install_requires=['setuptools'],
-    tests_require=['pytest'],
     zip_safe=True,
     maintainer='TurtleBot 4 User',
     maintainer_email='user@example.com',
@@ -26,6 +25,8 @@ setup(
         'console_scripts': [
             'keyboard_control = '
             'turtlebot4_keyboard_control.keyboard_control:main',
+            'lightring_control = '
+            'turtlebot4_keyboard_control.lightring_control:main',
         ],
     },
 )

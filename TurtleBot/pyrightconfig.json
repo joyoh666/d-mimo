@@ -1,0 +1,12 @@
+{
+  "include": [
+    "src/turtlebot4_keyboard_control/turtlebot4_keyboard_control",
+    "src/turtlebot4_keyboard_control/test",
+    "test.py"
+  ],
+  "extraPaths": [
+    "src/turtlebot4_keyboard_control"
+  ],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic"
+}
