@@ -1,0 +1,17 @@
+{
+    "folders": [
+        {
+            "name": "TurtleBot (ROS 2 Jazzy)",
+            "path": "TurtleBot"
+        },
+        {
+            "name": "D-MIMO (Python 3.14)",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "files.exclude": {
+            "TurtleBot": true
+        }
+    }
+}

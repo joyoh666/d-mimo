@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # TurtleBot ROS 2 workspace
 
 This directory is a ROS 2 workspace. The Python package lives below
@@ -40,3 +41,13 @@ the editor from a terminal where `/opt/ros/jazzy/setup.bash` has been sourced.
 `rclpy`, `geometry_msgs`, and `irobot_create_msgs`.
 
 See `src/turtlebot4_keyboard_control/README.md` for controls and run commands.
+=======
+# TurtleBot 4 Lite keyboard control workspace
+
+This ROS 2 Jazzy workspace contains an arrow-key controller for a TurtleBot 4
+Lite. The control session runs until `Q` or `Ctrl-C` is pressed.
+
+See [`src/turtlebot4_keyboard_control/README.md`](src/turtlebot4_keyboard_control/README.md)
+for build, connectivity, and run instructions.
+
+>>>>>>> a416ca0 (0904)

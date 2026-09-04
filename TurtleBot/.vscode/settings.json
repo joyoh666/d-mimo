@@ -1,0 +1,16 @@
+{
+    "python.defaultInterpreterPath": "/usr/bin/python3",
+    "python.analysis.extraPaths": [
+        "/opt/ros/jazzy/lib/python3.12/site-packages"
+    ],
+    "terminal.integrated.profiles.linux": {
+        "ROS 2 Jazzy": {
+            "path": "/bin/bash",
+            "args": [
+                "--init-file",
+                "${workspaceFolder}/.vscode/ros_init.bash"
+            ]
+        }
+    },
+    "terminal.integrated.defaultProfile.linux": "ROS 2 Jazzy"
+}

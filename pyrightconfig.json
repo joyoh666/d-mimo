@@ -1,0 +1,19 @@
+{
+    "pythonVersion": "3.14",
+    "pythonPlatform": "Linux",
+    "executionEnvironments": [
+        {
+            "root": "TurtleBot",
+            "pythonVersion": "3.12",
+            "pythonPlatform": "Linux",
+            "extraPaths": [
+                "/opt/ros/jazzy/lib/python3.12/site-packages"
+            ]
+        },
+        {
+            "root": ".",
+            "pythonVersion": "3.14",
+            "pythonPlatform": "Linux"
+        }
+    ]
+}
