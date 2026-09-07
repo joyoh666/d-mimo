@@ -5,13 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "commpy>=1.2.0",
     "d>=0.2.2",
     "matplotlib>=3.7",
     "numpy>=1.24",
     "pandas>=2.3.3",
+    "scikit-commpy>=0.8.0",
     "scikit-learn>=1.9.0",
     "scipy>=1.10",
     "sionna>=0.19.2",
     "tdqm>=0.0.1",
     "torch>=2.8.0",
+    "utils>=1.0.2",
 ]

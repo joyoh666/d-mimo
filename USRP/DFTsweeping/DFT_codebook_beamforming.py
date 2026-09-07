@@ -7,7 +7,7 @@ Steering vector는 이상적인 방향별 빔 패턴을 계산할 때 사용된�
 """
 
 import numpy as np
-from DFT_codebook_generator import UPA_codebook_generator_DFT
+from USRP.DFTsweeping.DFT_codebook_generator import UPA_codebook_generator_DFT
 
 N_antx = 4
 N_anty = 1

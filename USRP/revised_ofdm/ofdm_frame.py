@@ -10,9 +10,9 @@ from numpy.typing import NDArray
 
 try:  # Support script execution and package-style imports.
     from .config import DEFAULT_CONFIG, OFDMConfig
-    from .modulate import modulate
+    from ...modulate import modulate
 except ImportError:
-    from config import DEFAULT_CONFIG, OFDMConfig
+    from USRP.test.revised_ofdm.config import DEFAULT_CONFIG, OFDMConfig
     from modulate import modulate
 
 

@@ -15,9 +15,9 @@ import uhd
 
 try:  # Support script execution and package-style imports.
     from .config import DEFAULT_CONFIG, OFDMConfig
-    from .usrp_utils import sendAndReceive
+    from ...usrp_utils import sendAndReceive
 except ImportError:
-    from config import DEFAULT_CONFIG, OFDMConfig
+    from USRP.test.revised_ofdm.config import DEFAULT_CONFIG, OFDMConfig
     from usrp_utils import sendAndReceive
 
 

@@ -23,7 +23,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from DFT_codebook_generator import UPA_codebook_generator_DFT
+from USRP.DFTsweeping.DFT_codebook_generator import UPA_codebook_generator_DFT
 
 # ------------------------------------------------
 # 2. CREATE PROJECT RESULT FOLDER

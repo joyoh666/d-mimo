@@ -17,7 +17,7 @@ from scipy.signal import correlate
 try:  # Support script execution and package-style imports.
     from .config import DEFAULT_CONFIG, OFDMConfig
 except ImportError:
-    from config import DEFAULT_CONFIG, OFDMConfig
+    from USRP.revised_ofdm.config import DEFAULT_CONFIG, OFDMConfig
 
 
 ComplexArray = NDArray[np.complex64]
