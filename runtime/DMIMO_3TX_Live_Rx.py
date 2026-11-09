@@ -30,9 +30,110 @@
 import os
 import time
 import json
+import random
+import subprocess
+import sys
 import threading
 from pathlib import Path
 from datetime import datetime
+
+# 기본 실행은 1~75 중 중복 없이 5개를 고르는 배치 모드다. 각 측정은 기존의
+# 단일 시나리오 코드를 별도 프로세스로 실행하므로 USRP/ROS 자원과 저장 파일이
+# 시나리오 사이에 섞이지 않는다. 자식 프로세스는 이 블록을 건너뛴다.
+BATCH_MODE = os.environ.get("BATCH_MODE", "1") == "1"
+BATCH_CHILD = os.environ.get("BATCH_CHILD", "0") == "1"
+
+
+def _run_random_scenario_batch():
+    count = int(os.environ.get("SCENARIO_COUNT", "5"))
+    if not 1 <= count <= 75:
+        raise ValueError("SCENARIO_COUNT must be 1..75")
+
+    seed_text = os.environ.get("SCENARIO_SEED", "").strip()
+    rng = random.Random(int(seed_text)) if seed_text else random.SystemRandom()
+    scenario_ids = rng.sample(range(1, 76), count)
+
+    batch_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_root = Path(os.environ.get("SAVE_ROOT", f"./logs/{datetime.now():%Y%m%d}"))
+    batch_dir = save_root / f"{batch_stamp}_random_{count}scenarios"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    home_pose_file = batch_dir / "initial_slam_pose.json"
+    manifest_path = batch_dir / "batch_manifest.json"
+
+    manifest = {
+        "batch_id": batch_stamp,
+        "scenario_ids": scenario_ids,
+        "scenario_count": count,
+        "scenario_seed": int(seed_text) if seed_text else None,
+        "initial_pose_file": str(home_pose_file.resolve()),
+        "completed": [],
+        "status": "running",
+    }
+
+    def save_manifest():
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    save_manifest()
+    print("\n====================")
+    print("RANDOM SCENARIO BATCH")
+    print("Selected IDs :", scenario_ids)
+    print("Batch dir    :", batch_dir.resolve())
+    print("====================\n", flush=True)
+
+    repo_root = Path(__file__).resolve().parent.parent
+    script_path = Path(__file__).resolve()
+    exit_code = 0
+    try:
+        for run_index, scenario_id in enumerate(scenario_ids, start=1):
+            print(f"\n[BATCH {run_index}/{count}] Scenario {scenario_id} 시작", flush=True)
+            child_env = dict(os.environ)
+            child_env.update({
+                "BATCH_CHILD": "1",
+                "BATCH_ID": batch_stamp,
+                "SCENARIO_ID": str(scenario_id),
+                "SAVE_ROOT": str(batch_dir.resolve()),
+                "HOME_POSE_FILE": str(home_pose_file.resolve()),
+                "RETURN_HOME": "1",
+            })
+            # 배치 중 plt.show()가 다음 시나리오를 막지 않게 PNG만 저장한다.
+            if os.environ.get("BATCH_SHOW_PLOTS", "0") != "1":
+                child_env["MPLBACKEND"] = "Agg"
+            result = subprocess.run(
+                [sys.executable, "-u", str(script_path)],
+                cwd=str(repo_root),
+                env=child_env,
+                check=False,
+            )
+            if result.returncode != 0:
+                exit_code = result.returncode or 1
+                manifest["status"] = "failed"
+                manifest["failed_scenario_id"] = scenario_id
+                manifest["failed_return_code"] = result.returncode
+                print(
+                    f"[BATCH] Scenario {scenario_id} 실패. 안전을 위해 다음 시나리오를 실행하지 않습니다.",
+                    flush=True,
+                )
+                break
+
+            manifest["completed"].append(scenario_id)
+            save_manifest()
+            print(f"[BATCH {run_index}/{count}] Scenario {scenario_id} 완료 및 원위치 복귀 확인", flush=True)
+        else:
+            manifest["status"] = "completed"
+    except KeyboardInterrupt:
+        exit_code = 130
+        manifest["status"] = "interrupted"
+        print("\n[BATCH] 사용자 중단", flush=True)
+    finally:
+        save_manifest()
+
+    print(f"[BATCH] 결과: {manifest['status']} · {manifest_path.resolve()}", flush=True)
+    return exit_code
+
+
+if BATCH_MODE and not BATCH_CHILD:
+    raise SystemExit(_run_random_scenario_batch())
 
 import numpy as np
 import pandas as pd
@@ -80,6 +181,7 @@ WINDOW_SEC = 0.005                 # 5 ms = 반 프레임 = 70 OFDM 심볼
 SYMS_PER_WINDOW = [1, 2, 3]        # 5 ms 마다 이 세 심볼에서 H 를 잰다 (프레임 첫 슬롯의 sync 심볼 5/6 은 피함)
 
 WAIT_POSE_TIMEOUT_SEC = 30.0
+RETURN_TIMEOUT_SEC = float(os.environ.get("RETURN_TIMEOUT_SEC", "35.0"))
 RING_SECONDS = float(os.environ.get("RING_SECONDS", "4.0"))
 RECV_CHUNK = int(os.environ.get("RECV_CHUNK", "20000"))
 RX_TIMEOUT_SEC = 0.20
@@ -403,12 +505,12 @@ out_dir = SAVE_ROOT / f"{stamp}_{EXP_TAG}"
 out_dir.mkdir(parents=True, exist_ok=True)
 
 if ROBOT_PROC:
-    import subprocess, sys as _sys
+    import sys as _sys
     _here = Path(__file__).resolve().parent
     print("SLAM 데이터 수신 대기...")
-    robot_proc = subprocess.Popen([_sys.executable, "-u", str(_here / "hy_robot_proc.py"), str(SCENARIO_ID),
+    robot_proc = subprocess.Popen([_sys.executable, "-u", "-m", "runtime.hy_robot_proc", str(SCENARIO_ID),
                                    str((out_dir / "scenario").resolve()), str(PRE_ROLL_SECONDS)],
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, cwd=str(_here),
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, cwd=str(_here.parent),
                                   encoding="utf-8", errors="replace", env=dict(os.environ, PYTHONIOENCODING="utf-8"))
     for _line in robot_proc.stdout:
         _line = _line.rstrip("\n")
@@ -725,7 +827,12 @@ finally:
     time.sleep(0.2)
     tx_stop.set()
 
-scenario_thread.join(timeout=2.0)
+# 시나리오 종료 뒤 원위치 복귀까지 자식 프로세스가 @@DONE을 보내지 않는다.
+# 복귀 확인 전에 프로세스를 종료하거나 다음 배치를 시작하지 않도록 충분히 기다린다.
+scenario_thread.join(timeout=(2.0 if NO_ROBOT else RETURN_TIMEOUT_SEC + 10.0))
+if scenario_thread.is_alive():
+    scenario_result["error"] = f"scenario/return worker timeout ({RETURN_TIMEOUT_SEC:.1f}s)"
+    print("[SCENARIO] ERROR:", scenario_result["error"])
 if robot_proc is not None:
     try:
         robot_proc.wait(timeout=5.0)
@@ -808,6 +915,10 @@ np.savez_compressed(
 cfg = {
     "code": "DMIMO_3TX_Turtlebot_Rx.py (d_mimo_1017_3iso)",
     "RUN_SECONDS": RUN_SECONDS, "SCENARIO_ID": SCENARIO_ID, "SCENARIO_NAME": f"bounded_random_S{SCENARIO_ID:02d}",
+    "BATCH_ID": os.environ.get("BATCH_ID"),
+    "HOME_POSE_FILE": os.environ.get("HOME_POSE_FILE"),
+    "RETURN_HOME": os.environ.get("RETURN_HOME", "1") == "1",
+    "RETURN_RESULT": scenario_result.get("return_home"),
     "ANT_TAG": ANT_TAG, "SCENARIO_DURATION_S": TOTAL_DURATION,
     "PRE_ROLL_SECONDS": PRE_ROLL_SECONDS, "POST_ROLL_SECONDS": POST_ROLL_SECONDS,
     "t0_wall": t0_wall, "t0_usrp_est": t0_usrp_est, "host_usrp_clock_map": clock_map,
@@ -900,4 +1011,4 @@ if os.environ.get("NO_PLOT", "0") != "1":
 del tx_streamer, rx_streamer, usrp
 print("Done.", flush=True)
 import sys as _s; _s.stdout.flush(); _s.stderr.flush()
-os._exit(0)                                                    # UHD/rclpy 스레드 정리 중 멈춤을 피한다
+os._exit(1 if scenario_result.get("error") else 0)             # UHD/rclpy 스레드 정리 중 멈춤을 피한다
