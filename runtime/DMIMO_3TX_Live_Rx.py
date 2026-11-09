@@ -38,8 +38,9 @@ from pathlib import Path
 from datetime import datetime
 
 # 기본 실행은 1~75 중 중복 없이 5개를 고르는 배치 모드다. 각 측정은 기존의
-# 단일 시나리오 코드를 별도 프로세스로 실행하므로 USRP/ROS 자원과 저장 파일이
-# 시나리오 사이에 섞이지 않는다. 자식 프로세스는 이 블록을 건너뛴다.
+# 단일 시나리오 코드를 별도 프로세스로 실행한다. 로봇 자식 프로세스는 충전기에서
+# undock한 뒤 odometry로 시나리오를 실행하고, dock 완료를 확인해야 종료한다.
+# 따라서 배치는 이전 시나리오가 충전기에 복귀한 후에만 다음 자식을 실행한다.
 BATCH_MODE = os.environ.get("BATCH_MODE", "1") == "1"
 BATCH_CHILD = os.environ.get("BATCH_CHILD", "0") == "1"
 
@@ -57,7 +58,6 @@ def _run_random_scenario_batch():
     save_root = Path(os.environ.get("SAVE_ROOT", f"./logs/{datetime.now():%Y%m%d}"))
     batch_dir = save_root / f"{batch_stamp}_random_{count}scenarios"
     batch_dir.mkdir(parents=True, exist_ok=True)
-    home_pose_file = batch_dir / "initial_slam_pose.json"
     manifest_path = batch_dir / "batch_manifest.json"
 
     manifest = {
@@ -65,7 +65,8 @@ def _run_random_scenario_batch():
         "scenario_ids": scenario_ids,
         "scenario_count": count,
         "scenario_seed": int(seed_text) if seed_text else None,
-        "initial_pose_file": str(home_pose_file.resolve()),
+        "pose_source": "create3_odometry",
+        "start_and_return": "create3_dock_actions",
         "completed": [],
         "status": "running",
     }
@@ -93,8 +94,7 @@ def _run_random_scenario_batch():
                 "BATCH_ID": batch_stamp,
                 "SCENARIO_ID": str(scenario_id),
                 "SAVE_ROOT": str(batch_dir.resolve()),
-                "HOME_POSE_FILE": str(home_pose_file.resolve()),
-                "RETURN_HOME": "1",
+                "POSE_FRAME": "odom",
             })
             # 배치 중 plt.show()가 다음 시나리오를 막지 않게 PNG만 저장한다.
             if os.environ.get("BATCH_SHOW_PLOTS", "0") != "1":
@@ -118,7 +118,10 @@ def _run_random_scenario_batch():
 
             manifest["completed"].append(scenario_id)
             save_manifest()
-            print(f"[BATCH {run_index}/{count}] Scenario {scenario_id} 완료 및 원위치 복귀 확인", flush=True)
+            print(
+                f"[BATCH {run_index}/{count}] Scenario {scenario_id} 완료 및 충전기 복귀 확인",
+                flush=True,
+            )
         else:
             manifest["status"] = "completed"
     except KeyboardInterrupt:
@@ -181,7 +184,7 @@ WINDOW_SEC = 0.005                 # 5 ms = 반 프레임 = 70 OFDM 심볼
 SYMS_PER_WINDOW = [1, 2, 3]        # 5 ms 마다 이 세 심볼에서 H 를 잰다 (프레임 첫 슬롯의 sync 심볼 5/6 은 피함)
 
 WAIT_POSE_TIMEOUT_SEC = 30.0
-RETURN_TIMEOUT_SEC = float(os.environ.get("RETURN_TIMEOUT_SEC", "35.0"))
+DOCK_TIMEOUT_SEC = float(os.environ.get("DOCK_TIMEOUT_SEC", "60.0"))
 RING_SECONDS = float(os.environ.get("RING_SECONDS", "4.0"))
 RECV_CHUNK = int(os.environ.get("RECV_CHUNK", "20000"))
 RX_TIMEOUT_SEC = 0.20
@@ -507,7 +510,7 @@ out_dir.mkdir(parents=True, exist_ok=True)
 if ROBOT_PROC:
     import sys as _sys
     _here = Path(__file__).resolve().parent
-    print("SLAM 데이터 수신 대기...")
+    print("Create 3 odometry 및 충전기 상태 수신 대기...")
     robot_proc = subprocess.Popen([_sys.executable, "-u", "-m", "runtime.hy_robot_proc", str(SCENARIO_ID),
                                    str((out_dir / "scenario").resolve()), str(PRE_ROLL_SECONDS)],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1, cwd=str(_here.parent),
@@ -521,7 +524,7 @@ if ROBOT_PROC:
         print(_line)
     else:
         raise RuntimeError("로봇 프로세스가 READY 전에 끝났다")
-    print("Pose 수신 시작 OK.")
+    print("충전기 출발 및 odometry 수신 OK.")
 else:
     print("[NO_ROBOT] 터틀봇 없이 진행")
 
@@ -827,11 +830,11 @@ finally:
     time.sleep(0.2)
     tx_stop.set()
 
-# 시나리오 종료 뒤 원위치 복귀까지 자식 프로세스가 @@DONE을 보내지 않는다.
-# 복귀 확인 전에 프로세스를 종료하거나 다음 배치를 시작하지 않도록 충분히 기다린다.
-scenario_thread.join(timeout=(2.0 if NO_ROBOT else RETURN_TIMEOUT_SEC + 10.0))
+# 시나리오 종료 뒤 /dock 액션과 /dock_status 확인이 모두 끝나야
+# 자식 프로세스가 @@DONE을 보낸다. 그 전에 다음 배치를 시작하지 않는다.
+scenario_thread.join(timeout=(2.0 if NO_ROBOT else DOCK_TIMEOUT_SEC + 10.0))
 if scenario_thread.is_alive():
-    scenario_result["error"] = f"scenario/return worker timeout ({RETURN_TIMEOUT_SEC:.1f}s)"
+    scenario_result["error"] = f"scenario/dock worker timeout ({DOCK_TIMEOUT_SEC:.1f}s)"
     print("[SCENARIO] ERROR:", scenario_result["error"])
 if robot_proc is not None:
     try:
@@ -916,9 +919,10 @@ cfg = {
     "code": "DMIMO_3TX_Turtlebot_Rx.py (d_mimo_1017_3iso)",
     "RUN_SECONDS": RUN_SECONDS, "SCENARIO_ID": SCENARIO_ID, "SCENARIO_NAME": f"bounded_random_S{SCENARIO_ID:02d}",
     "BATCH_ID": os.environ.get("BATCH_ID"),
-    "HOME_POSE_FILE": os.environ.get("HOME_POSE_FILE"),
-    "RETURN_HOME": os.environ.get("RETURN_HOME", "1") == "1",
-    "RETURN_RESULT": scenario_result.get("return_home"),
+    "POSE_SOURCE": "create3_odometry",
+    "POSE_FRAME": "odom",
+    "DOCK_BETWEEN_SCENARIOS": True,
+    "DOCK_CYCLE": scenario_result.get("dock_cycle"),
     "ANT_TAG": ANT_TAG, "SCENARIO_DURATION_S": TOTAL_DURATION,
     "PRE_ROLL_SECONDS": PRE_ROLL_SECONDS, "POST_ROLL_SECONDS": POST_ROLL_SECONDS,
     "t0_wall": t0_wall, "t0_usrp_est": t0_usrp_est, "host_usrp_clock_map": clock_map,

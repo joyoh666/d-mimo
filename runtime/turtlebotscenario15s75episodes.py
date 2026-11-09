@@ -236,8 +236,10 @@ SCENARIOS = build_scenarios()
 # =============================================================================
 # Geometry / ROS helpers
 # =============================================================================
-def local_to_map(x_local: float, y_local: float,
-                 start_x: float, start_y: float, start_yaw_deg: float) -> Tuple[float, float]:
+def local_to_pose_frame(x_local: float, y_local: float,
+                        start_x: float, start_y: float,
+                        start_yaw_deg: float) -> Tuple[float, float]:
+    """Transform a scenario-local target into the node's odometry frame."""
     yaw = math.radians(start_yaw_deg)
     c, s = math.cos(yaw), math.sin(yaw)
     return (
@@ -270,20 +272,23 @@ def wait_for_pose(node: TB4AdvancedControl, timeout: float = WAIT_POSE_TIMEOUT_S
         if pose is not None:
             return pose
         time.sleep(0.1)
-    raise RuntimeError("No TurtleBot pose received. Check SLAM / ROS_DOMAIN_ID / network.")
+    raise RuntimeError(
+        f"No TurtleBot pose received in {node.pose_frame!r}. "
+        "Check turtlebot4_bringup, ROS_DOMAIN_ID and network."
+    )
 
 
-def _target_heading_and_distance(pose, target_map: Tuple[float, float]):
+def _target_heading_and_distance(pose, target_frame: Tuple[float, float]):
     x, y, yaw_deg = pose
-    dx = target_map[0] - x
-    dy = target_map[1] - y
+    dx = target_frame[0] - x
+    dy = target_frame[1] - y
     dist = math.hypot(dx, dy)
     desired = math.atan2(dy, dx)
     err = wrap_pi(desired - math.radians(yaw_deg))
     return dist, err
 
 
-def _forward_drive_controller(pose, target_map: Tuple[float, float], cruise_v: float,
+def _forward_drive_controller(pose, target_frame: Tuple[float, float], cruise_v: float,
                               align_mode: bool) -> Tuple[float, float, float, float, bool, str]:
     """
     Translation-dominant waypoint controller.
@@ -292,7 +297,7 @@ def _forward_drive_controller(pose, target_map: Tuple[float, float], cruise_v: f
     - Small/moderate error: positive forward velocity with only mild steering correction.
     - No reverse motion under any condition.
     """
-    dist, err = _target_heading_and_distance(pose, target_map)
+    dist, err = _target_heading_and_distance(pose, target_frame)
     abs_err = abs(err)
 
     if dist <= WAYPOINT_TOL_M:
@@ -330,6 +335,8 @@ def scenario_definition_dict(s: Scenario) -> dict:
         "master_seed": MASTER_SEED,
         "spawn_key": list(s.spawn_key),
         "duration_s": TOTAL_DURATION,
+        "pose_source": "create3_odometry",
+        "pose_frame": "odom",
         "route_type": "forward_only_translation_dominant_waypoints",
         "waypoint_radius_max_m": WAYPOINT_RADIUS_MAX_M,
         "soft_radius_m": SOFT_RADIUS_M,
@@ -425,7 +432,8 @@ def run_scenario(node: TB4AdvancedControl,
         "t0_wall": t0_wall,
         "t0_monotonic": t0_mono,
         "duration_s": TOTAL_DURATION,
-        "start_pose": {"x": sx, "y": sy, "yaw_deg": syaw},
+        "pose_frame": node.pose_frame,
+        "start_pose": {"frame_id": node.pose_frame, "x": sx, "y": sy, "yaw_deg": syaw},
         "callback_data": callback_data,
     }
     with open(out_dir / "scenario_event.json", "w") as f:
@@ -469,9 +477,9 @@ def run_scenario(node: TB4AdvancedControl,
                 print(f"[SAFETY] Hard radius exceeded ({radius:.3f} m). Aborting.")
                 break
 
-            # Nominal route target in the map frame.
+            # Nominal route target in the Create 3 odometry frame.
             wp = scenario.waypoints[waypoint_idx % len(scenario.waypoints)]
-            target_map = local_to_map(wp.x, wp.y, sx, sy, syaw)
+            target_frame = local_to_pose_frame(wp.x, wp.y, sx, sy, syaw)
 
             if radius >= SOFT_RADIUS_M:
                 # Drive toward the start region using forward-only control.
@@ -483,9 +491,9 @@ def run_scenario(node: TB4AdvancedControl,
                 mode_used = "RECOVER_ALIGN" if inner_mode == "ALIGN" else "RECOVER_DRIVE"
             else:
                 v_cmd, w_cmd, dist, heading_err, align_mode, inner_mode = _forward_drive_controller(
-                    pose, target_map, cruise_v=wp.speed, align_mode=align_mode
+                    pose, target_frame, cruise_v=wp.speed, align_mode=align_mode
                 )
-                target_used = target_map
+                target_used = target_frame
                 mode_used = inner_mode
 
                 if inner_mode == "REACHED":
@@ -493,12 +501,12 @@ def run_scenario(node: TB4AdvancedControl,
                     waypoint_idx += 1
                     align_mode = True
                     wp = scenario.waypoints[waypoint_idx % len(scenario.waypoints)]
-                    target_map = local_to_map(wp.x, wp.y, sx, sy, syaw)
+                    target_frame = local_to_pose_frame(wp.x, wp.y, sx, sy, syaw)
                     # Immediately start aligning toward the next long straight leg.
                     v_cmd, w_cmd, dist, heading_err, align_mode, inner_mode = _forward_drive_controller(
-                        pose, target_map, cruise_v=wp.speed, align_mode=True
+                        pose, target_frame, cruise_v=wp.speed, align_mode=True
                     )
-                    target_used = target_map
+                    target_used = target_frame
                     mode_used = inner_mode
 
             publish_velocity(node, v_cmd, w_cmd)
@@ -521,6 +529,10 @@ def run_scenario(node: TB4AdvancedControl,
                 "y": y,
                 "yaw_deg": yaw_deg,
                 "radius_from_start_m": radius,
+                "pose_frame": node.pose_frame,
+                "target_frame_x": target_used[0],
+                "target_frame_y": target_used[1],
+                # Legacy aliases retained for existing dataset readers.
                 "target_map_x": target_used[0],
                 "target_map_y": target_used[1],
                 "target_local_x": wp.x,
