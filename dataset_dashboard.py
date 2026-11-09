@@ -13,6 +13,9 @@ Supported inputs
 * ``.npy`` shaped ``(T, 3)``, ``(T, 6)``, or ``(N, T, C)``.
 * ``.csv`` with three complex columns, or real/imaginary column pairs.
 
+Both exported NumPy models (``.npz``) and the PyTorch checkpoints written by
+``train_GRU.py`` / the RU scheduler trainer (``.pt`` or ``.pth``) are accepted.
+
 Examples
 --------
 Preview with generated CSI::
@@ -271,7 +274,10 @@ def prepare_model_input(
             pair_error = float(np.mean(np.abs(values[:, 0::2] - values[:, 1::2])))
             pair_level = float(np.mean(np.abs(values))) + 1e-12
             if pair_error / pair_level > 0.05:
-                print("[WARN] six model-X columns are not duplicated RU pairs; displaying the first antenna of each pair")
+                raise ValueError(
+                    "Six-column model-X contains distinct antenna channels. This three-plot dashboard currently "
+                    "supports three channels or legacy duplicated RU pairs, not collapsing distinct antennas."
+                )
             x = values[:, 0::2]
         else:
             if representation == "legacy-x6":
@@ -282,7 +288,7 @@ def prepare_model_input(
     return np.asarray(x, dtype=np.complex64), scale, scale_source, duplicate_rus
 
 
-def resolve_model(path_text: str, model_dir: str | None) -> Path:
+def resolve_model(path_text: str, model_dir: str | None, fallback_patterns: tuple[str, ...] = ()) -> Path:
     requested = Path(path_text).expanduser()
     candidates = [requested]
     if model_dir:
@@ -293,6 +299,12 @@ def resolve_model(path_text: str, model_dir: str | None) -> Path:
         candidate = candidate.resolve()
         if candidate.is_file():
             return candidate
+    for pattern in fallback_patterns:
+        matches = sorted(HERE.glob(pattern), key=lambda item: item.stat().st_mtime, reverse=True)
+        if matches:
+            selected = matches[0].resolve()
+            print(f"[MODEL] {requested.name} not found; using checkpoint {selected}")
+            return selected
     checked = "\n  - ".join(str(p.resolve()) for p in candidates)
     raise FileNotFoundError(f"Model {requested.name!r} was not found. Checked:\n  - {checked}\nUse --model-dir or an explicit model path.")
 
@@ -303,15 +315,15 @@ class OfflinePipeline:
     def __init__(
         self,
         x: np.ndarray,
-        predictor_path: Path,
-        dqn_path: Path,
+        predictor: hc.NumpyPredictor,
+        dqn: hc.NumpyDQN,
         args: argparse.Namespace,
         duplicate_rus: bool,
     ):
         self.x = x
         self.args = args
-        self.pred = hc.NumpyPredictor(predictor_path)
-        self.dqn = hc.NumpyDQN(dqn_path)
+        self.pred = predictor
+        self.dqn = dqn
         self.taps = self.pred.taps
         self.K = self.pred.K
         self.seg = int(self.dqn.cfg["seg_len_ticks"])
@@ -324,7 +336,11 @@ class OfflinePipeline:
         self.err_hist: list[tuple[int, int, float, float, float, float]] = []
         self.ru_gain: list[np.ndarray] = []
         self.state_rate: list[np.ndarray] = []
-        self.serve = [args.init_state, args.init_state]
+        self.serve = (
+            [args.init_state]
+            if self.dqn.timing == "next-segment"
+            else [args.init_state, args.init_state]
+        )
         self.q_hist: list[np.ndarray] = []
         self.rng = np.random.RandomState(args.seed)
         self.duplicate_rus = duplicate_rus
@@ -383,8 +399,17 @@ class OfflinePipeline:
         self.state_rate.append(
             hc.all_state_power_segment(gains, self.phase_std, self.noise_power, self.snr_db, self.rng)
         )
-        seg_k = c + 1
-        obs = hc.make_obs(self.ru_gain, self.serve, seg_k, self.serve[seg_k], self.hist_bins)
+        if self.dqn.timing == "next-segment":
+            # train_RU_scheduler.py: observe history through segment c-1 and
+            # choose the connection used by reward/service segment c+1.
+            seg_k = c
+            connection_state = self.serve[c]
+        else:
+            # Legacy scheduler: the action selected after segment c is served
+            # by segment c+2.
+            seg_k = c + 1
+            connection_state = self.serve[seg_k]
+        obs = hc.make_obs(self.ru_gain, self.serve, seg_k, connection_state, self.hist_bins)
         action, q = self.dqn.step(obs)
         self.serve.append(action)
         self.q_hist.append(q)
@@ -755,8 +780,8 @@ def parse_args() -> argparse.Namespace:
         help="current three-column X or legacy duplicated six-column X; auto reads the array/scale metadata",
     )
     parser.add_argument("--model-dir", help="directory containing predictor.npz and dqn.npz")
-    parser.add_argument("--predictor-model", default="predictor.npz")
-    parser.add_argument("--dqn-model", default="dqn.npz")
+    parser.add_argument("--predictor-model", default="predictor.npz", help="predictor .npz/.pt/.pth model")
+    parser.add_argument("--dqn-model", default="dqn.npz", help="RU scheduler .npz/.pt/.pth model")
     parser.add_argument("--context-steps", type=int, default=40, help="GRU context in 25 ms steps")
     parser.add_argument("--min-context-steps", type=int, default=8)
     parser.add_argument("--init-state", type=int, choices=range(6), default=0)
@@ -782,9 +807,56 @@ def main() -> int:
     args = parse_args()
     try:
         dataset = load_dataset(args.data, args.key, args.sample_index, args.input_kind)
-        x, scale, scale_source, duplicate_rus = prepare_model_input(dataset, args.scale, args.representation)
-        predictor_path = resolve_model(args.predictor_model, args.model_dir)
-        dqn_path = resolve_model(args.dqn_model, args.model_dir)
+        predictor_fallbacks = (
+            ("checkpoints_rnn/best_validation_nmse.pt", "checkpoints_rnn/*.pt")
+            if args.predictor_model == "predictor.npz"
+            else ()
+        )
+        dqn_fallbacks = (
+            (
+                "checkpoints_ru_scheduler/final_best_model.pt",
+                "checkpoints_ru_scheduler/best_validation.pt",
+                "checkpoints_ru_scheduler/*.pt",
+                "checkpoints_double_dqn_ru_windows4s_easiest/*.pt",
+                "checkpoints_dqn/*.pt",
+            )
+            if args.dqn_model == "dqn.npz"
+            else ()
+        )
+        predictor_path = resolve_model(args.predictor_model, args.model_dir, predictor_fallbacks)
+        dqn_path = resolve_model(args.dqn_model, args.model_dir, dqn_fallbacks)
+        predictor = hc.NumpyPredictor(predictor_path)
+        dqn = hc.NumpyDQN(dqn_path)
+
+        scale_spec = args.scale
+        checkpoint_scale = dqn.data_meta.get("scale")
+        if dataset.input_kind == "raw-csi" and args.scale.lower() == "auto" and checkpoint_scale is not None:
+            scale_spec = str(float(checkpoint_scale))
+        representation = args.representation
+        if representation == "auto" and dqn.timing == "next-segment" and dataset.values.shape[1] == 3:
+            representation = "preserve"
+        x, scale, scale_source, duplicate_rus = prepare_model_input(dataset, scale_spec, representation)
+        if scale_spec != args.scale:
+            scale_source = f"{dqn_path.name} data_meta"
+
+        expected_antennas = dqn.data_meta.get("num_antennas")
+        actual_scheduler_antennas = 6 if duplicate_rus else x.shape[1]
+        if expected_antennas is not None and int(expected_antennas) != actual_scheduler_antennas:
+            raise ValueError(
+                f"RU scheduler was trained with {expected_antennas} antenna channels, but this input provides "
+                f"{actual_scheduler_antennas}. Use matching data/checkpoint or set --representation explicitly."
+            )
+        ru_antenna_counts = dqn.data_meta.get("ru_antenna_counts")
+        expected_counts = [2, 2, 2] if duplicate_rus else [1, 1, 1]
+        if ru_antenna_counts is not None and list(ru_antenna_counts) != expected_counts:
+            raise ValueError(
+                f"RU scheduler uses ru_antenna_counts={ru_antenna_counts}; this dashboard input maps as "
+                f"{expected_counts}. Use a matching three-channel dataset/checkpoint."
+            )
+        action_states = dqn.data_meta.get("action_states")
+        expected_states = [[0], [1], [2], [0, 1], [0, 2], [1, 2]]
+        if action_states is not None and action_states != expected_states:
+            raise ValueError(f"RU scheduler action layout {action_states} is incompatible with the dashboard")
         print(
             f"[DATA] {dataset.name} · key={dataset.selected_key} · kind={dataset.input_kind} · "
             f"shape={dataset.values.shape} · {len(x) * hc.DT:.2f} s"
@@ -792,7 +864,7 @@ def main() -> int:
         print(f"[MODEL] predictor={predictor_path}")
         print(f"[MODEL] dqn={dqn_path}")
         print(f"[SCALE] {scale:.6g} ({scale_source})")
-        pipeline = OfflinePipeline(x, predictor_path, dqn_path, args, duplicate_rus)
+        pipeline = OfflinePipeline(x, predictor, dqn, args, duplicate_rus)
         pipeline.run()
         print_summary(pipeline)
         if args.save_results:
@@ -800,7 +872,7 @@ def main() -> int:
         if not args.headless:
             run_gui(pipeline, dataset, scale, scale_source, args, args.snapshot)
         return 0
-    except (FileNotFoundError, KeyError, IndexError, ValueError) as exc:
+    except (FileNotFoundError, ImportError, KeyError, IndexError, RuntimeError, ValueError) as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
         return 2
 

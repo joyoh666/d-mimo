@@ -19,6 +19,33 @@ DATA_READY = HERE / "data_ready"
 MODEL_DIR = HERE / "models"
 
 
+def _torch_checkpoint(path: Path) -> dict:
+    """Load a trusted local training checkpoint without making torch a hard dependency."""
+    try:
+        import torch
+    except ImportError as exc:
+        raise ImportError(f"PyTorch is required to read checkpoint {path}") from exc
+    try:
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:  # torch versions before the weights_only argument
+        checkpoint = torch.load(path, map_location="cpu")
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Expected a dict checkpoint in {path}, got {type(checkpoint).__name__}")
+    return checkpoint
+
+
+def _state_numpy(state: dict, key: str) -> np.ndarray:
+    """Return one torch/numpy state-dict value as a detached CPU ndarray."""
+    value = state.get(key)
+    if value is None and f"module.{key}" in state:
+        value = state[f"module.{key}"]
+    if value is None:
+        raise KeyError(f"Checkpoint state is missing {key!r}")
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
 def default_logs() -> Path:
     """1017 측정 logs 위치. 노트북(d_mimo_1017_3iso/live_demo)이면 ../logs, 이 PC 정리본이면 ../../3_실험_*/logs."""
     cands = [HERE / "logs", HERE.parent / "logs"] + sorted(HERE.parent.parent.glob("3_실험_*/logs"))
@@ -94,14 +121,36 @@ class NumpyPredictor:
     """형주형 SimpleChannelRNN (GRU 1층, 토큰 + age) 의 K-step rollout (model_kstep_predict_batch)."""
 
     def __init__(self, path=MODEL_DIR / "predictor.npz"):
-        z = np.load(path, allow_pickle=False)
-        self.cfg = json.loads(str(z["config_json"]))
+        path = Path(path)
+        if path.suffix.lower() in {".pt", ".pth"}:
+            checkpoint = _torch_checkpoint(path)
+            state = checkpoint.get("model", checkpoint.get("state_dict"))
+            if not isinstance(state, dict):
+                raise KeyError(f"GRU checkpoint {path} has no 'model' state dict")
+            self.cfg = dict(checkpoint.get("config", {}))
+            self.cfg.setdefault("ckpt", str(path))
+            self.cfg.setdefault("epoch", checkpoint.get("epoch"))
+            self.w_ih = _state_numpy(state, "rnn.weight_ih_l0")
+            self.w_hh = _state_numpy(state, "rnn.weight_hh_l0")
+            self.b_ih = _state_numpy(state, "rnn.bias_ih_l0")
+            self.b_hh = _state_numpy(state, "rnn.bias_hh_l0")
+            self.w_out = _state_numpy(state, "out_proj.weight")
+            self.b_out = _state_numpy(state, "out_proj.bias")
+            self.init_tok = _state_numpy(state, "init_tok")
+        elif path.suffix.lower() == ".npz":
+            with np.load(path, allow_pickle=False) as z:
+                self.cfg = json.loads(str(z["config_json"]))
+                self.w_ih = np.asarray(z["rnn.weight_ih_l0"])
+                self.w_hh = np.asarray(z["rnn.weight_hh_l0"])
+                self.b_ih = np.asarray(z["rnn.bias_ih_l0"])
+                self.b_hh = np.asarray(z["rnn.bias_hh_l0"])
+                self.w_out = np.asarray(z["out_proj.weight"])
+                self.b_out = np.asarray(z["out_proj.bias"])
+                self.init_tok = np.asarray(z["init_tok"])
+        else:
+            raise ValueError(f"Predictor model must be .npz, .pt, or .pth: {path}")
         if int(self.cfg.get("num_layers", 1)) != 1 or str(self.cfg.get("rnn_type", "GRU")).upper() != "GRU":
             raise ValueError("numpy 판은 GRU 1층만 지원")
-        self.w_ih, self.w_hh = z["rnn.weight_ih_l0"], z["rnn.weight_hh_l0"]
-        self.b_ih, self.b_hh = z["rnn.bias_ih_l0"], z["rnn.bias_hh_l0"]
-        self.w_out, self.b_out = z["out_proj.weight"], z["out_proj.bias"]
-        self.init_tok = z["init_tok"]
         self.taps = int(self.cfg["samples_per_step"])
         self.K = int(self.cfg["pred_steps"])
         self.gain_scale = float(self.cfg["gain_scale"])
@@ -146,16 +195,59 @@ class NumpyDQN:
     """형주형 GRUQNetwork (GRUCell + q_head) — Final_Test_260316 의 model_greedy."""
 
     def __init__(self, path=MODEL_DIR / "dqn.npz"):
-        z = np.load(path, allow_pickle=False)
-        self.cfg = json.loads(str(z["env_cfg_json"]))
-        self.w_ih, self.w_hh = z["gru.weight_ih"], z["gru.weight_hh"]
-        self.b_ih, self.b_hh = z["gru.bias_ih"], z["gru.bias_hh"]
-        self.w_q, self.b_q = z["q_head.weight"], z["q_head.bias"]
-        self.h0 = z["h0"]
+        path = Path(path)
+        self.data_meta = {}
+        self.timing = "legacy-delayed"
+        if path.suffix.lower() in {".pt", ".pth"}:
+            checkpoint = _torch_checkpoint(path)
+            state = checkpoint.get("q_net", checkpoint.get("model", checkpoint.get("state_dict")))
+            if not isinstance(state, dict):
+                raise KeyError(f"RU scheduler checkpoint {path} has no 'q_net' state dict")
+            self.cfg = dict(checkpoint.get("env_cfg", checkpoint.get("config", {})))
+            self.data_meta = dict(checkpoint.get("data_meta", {}))
+            if self.data_meta:
+                self.timing = "next-segment"
+            self.cfg.setdefault("ckpt", str(path))
+            self.cfg.setdefault("step", checkpoint.get("global_step"))
+            self.w_ih = _state_numpy(state, "gru.weight_ih")
+            self.w_hh = _state_numpy(state, "gru.weight_hh")
+            self.b_ih = _state_numpy(state, "gru.bias_ih")
+            self.b_hh = _state_numpy(state, "gru.bias_hh")
+            self.w_q = _state_numpy(state, "q_head.weight")
+            self.b_q = _state_numpy(state, "q_head.bias")
+            self.h0 = _state_numpy(state, "h0") if "h0" in state or "module.h0" in state else np.zeros(self.w_hh.shape[1], np.float32)
+        elif path.suffix.lower() == ".npz":
+            with np.load(path, allow_pickle=False) as z:
+                self.cfg = json.loads(str(z["env_cfg_json"]))
+                self.w_ih = np.asarray(z["gru.weight_ih"])
+                self.w_hh = np.asarray(z["gru.weight_hh"])
+                self.b_ih = np.asarray(z["gru.bias_ih"])
+                self.b_hh = np.asarray(z["gru.bias_hh"])
+                self.w_q = np.asarray(z["q_head.weight"])
+                self.b_q = np.asarray(z["q_head.bias"])
+                self.h0 = np.asarray(z["h0"])
+        else:
+            raise ValueError(f"RU scheduler model must be .npz, .pt, or .pth: {path}")
+        required_cfg = ("seg_len_ticks", "obs_hist_bins", "inter_ru_phase_noise_std", "noise_power")
+        missing_cfg = [key for key in required_cfg if key not in self.cfg]
+        if missing_cfg:
+            raise KeyError(f"RU scheduler checkpoint is missing env config values: {missing_cfg}")
+        self.obs_dim = int(self.w_ih.shape[1])
+        self.n_actions = int(self.w_q.shape[0])
+        self.action_names = tuple(self.data_meta.get("action_names", STATE_NAMES))
+        expected_obs_dim = 3 * int(self.cfg["obs_hist_bins"]) + self.n_actions
+        if self.obs_dim != expected_obs_dim:
+            raise ValueError(
+                f"RU scheduler obs_dim={self.obs_dim}; the three-RU dashboard expects {expected_obs_dim}"
+            )
+        if self.n_actions != len(STATE_NAMES):
+            raise ValueError(
+                f"RU scheduler has {self.n_actions} actions; the three-RU dashboard requires {len(STATE_NAMES)}"
+            )
         self.reset()
 
     def reset(self):
-        self.h = self.h0.astype(np.float32).copy()[None, :]
+        self.h = self.h0.astype(np.float32).reshape(1, -1).copy()
 
     def step(self, obs: np.ndarray):
         self.h = gru_cell(obs[None, :].astype(np.float32), self.h, self.w_ih, self.w_hh, self.b_ih, self.b_hh)
