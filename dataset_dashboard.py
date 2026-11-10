@@ -540,7 +540,7 @@ def run_gui(
     fig.text(
         0.05,
         0.858,
-        "정확도 = 1 − NMSE (예측 오차 에너지 ÷ 실제 채널 에너지).  LR = 직선 외삽 비교 기준",
+        "Accuracy = 1 - NMSE (prediction-error energy / channel energy). LR = linear-extrapolation baseline.",
         fontsize=8.5,
         color="0.65",
         va="top",
@@ -548,7 +548,7 @@ def run_gui(
     fig.text(
         0.585,
         0.858,
-        "최선 RU 맞힘 = 다음 100 ms에서 rate가 가장 높은 조합 선택 비율 · 오라클 = 정답을 아는 선택",
+        "Best-RU accuracy = fraction selecting the highest-rate combination for the next 100 ms. Oracle knows the target.",
         fontsize=8.5,
         color="0.65",
         va="top",
@@ -561,41 +561,41 @@ def run_gui(
     left_lines = []
     for ru in range(3):
         ax = fig.add_subplot(grid[ru, 0])
-        ground_truth, = ax.plot([], [], color=RU_COLORS[ru], lw=1.6, label="실측 |h|")
-        pred_1, = ax.plot([], [], color="w", lw=0.9, ls=":", alpha=0.8, label="GRU 예측 +25 ms")
-        pred_5, = ax.plot([], [], color="#FF5252", lw=1.1, ls="--", alpha=0.9, label="GRU 예측 +125 ms")
-        forecast, = ax.plot([], [], color="#FF5252", lw=2.4, label="지금부터 125 ms 예측")
+        ground_truth, = ax.plot([], [], color=RU_COLORS[ru], lw=1.6, label="Measured |h|")
+        pred_1, = ax.plot([], [], color="w", lw=0.9, ls=":", alpha=0.8, label="GRU prediction +25 ms")
+        pred_5, = ax.plot([], [], color="#FF5252", lw=1.1, ls="--", alpha=0.9, label="GRU prediction +125 ms")
+        forecast, = ax.plot([], [], color="#FF5252", lw=2.4, label="125 ms forecast from now")
         ax.axvline(0, color="0.6", lw=0.8)
         ax.set_xlim(-window, K * tp * hc.DT + 0.05)
         ax.set_ylabel(f"RU{ru + 1}  |h| [dB]")
         ax.grid(alpha=0.25)
         if ru == 0:
-            ax.set_title("채널 예측 (GRU, 25 ms × 5 스텝)", loc="left", fontsize=11)
+            ax.set_title("Channel Prediction (GRU, 25 ms x 5 steps)", loc="left", fontsize=11)
             ax.legend(loc="lower left", fontsize=8, ncol=4)
         if ru == 2:
-            ax.set_xlabel("시간 [s] (0 = 현재 재생 위치)")
+            ax.set_xlabel("Time [s] (0 = current playback position)")
         text = ax.text(0.995, 0.96, "", transform=ax.transAxes, ha="right", va="top", fontsize=8.5, family="monospace")
         left_axes.append(ax)
         left_lines.append((ground_truth, pred_1, pred_5, forecast, text))
 
     gain_ax = fig.add_subplot(grid[0, 1])
     gain_lines = [gain_ax.step([], [], where="post", color=RU_COLORS[ru], lw=1.6, label=f"RU{ru + 1}")[0] for ru in range(3)]
-    gain_ax.set_title("RU 이득 (100 ms 세그먼트)", loc="left", fontsize=11)
+    gain_ax.set_title("RU Gain (100 ms segments)", loc="left", fontsize=11)
     gain_ax.set_ylabel("RU gain")
     gain_ax.legend(loc="upper left", fontsize=8, ncol=3)
     gain_ax.grid(alpha=0.25)
     gain_ax.set_xlim(-window, 0.2)
 
     action_ax = fig.add_subplot(grid[1, 1], sharex=gain_ax)
-    action_line, = action_ax.step([], [], where="post", color="#FFEB3B", lw=2.2, label="DQN 선택")
-    oracle_points = action_ax.scatter([], [], s=14, color="#E040FB", label="오라클", zorder=3)
+    action_line, = action_ax.step([], [], where="post", color="#FFEB3B", lw=2.2, label="DQN selection")
+    oracle_points = action_ax.scatter([], [], s=14, color="#E040FB", label="Oracle", zorder=3)
     action_ax.set_yticks(range(6))
     action_ax.set_yticklabels(hc.STATE_NAMES)
     action_ax.set_ylim(-0.5, 5.5)
-    action_ax.set_title("RU 스케줄링 (Double-DQN GRU)", loc="left", fontsize=11)
+    action_ax.set_title("RU Scheduling (Double-DQN GRU)", loc="left", fontsize=11)
     action_ax.legend(loc="upper left", fontsize=8, ncol=2)
     action_ax.grid(alpha=0.25)
-    action_ax.set_xlabel("시간 [s] (0 = 현재 재생 위치)")
+    action_ax.set_xlabel("Time [s] (0 = current playback position)")
 
     rate_ax = fig.add_subplot(grid[2, 1])
     rate_names = ["DQN", "Oracle", "Random"] + hc.STATE_NAMES
@@ -606,7 +606,7 @@ def run_gui(
     )
     rate_ax.set_xticks(range(len(rate_names)))
     rate_ax.set_xticklabels(rate_names, fontsize=9)
-    rate_ax.set_ylabel("평균 rate [b/s/Hz]")
+    rate_ax.set_ylabel("Average rate [b/s/Hz]")
     rate_ax.grid(alpha=0.25, axis="y")
     rate_title = rate_ax.set_title("", loc="left", fontsize=11)
 
@@ -640,11 +640,11 @@ def run_gui(
         lr_5 = accuracy(nmse["LR"][K - 1])
         if np.isfinite(gru_5):
             acc_predict.set_text(
-                f"채널 예측 정확도 (최근 {args.stat_sec:.0f} s)\n"
-                f"125 ms 앞: GRU {gru_5:.1f} % vs LR {lr_5:.1f} %     |     25 ms 앞: GRU {gru_1:.1f} %"
+                f"Channel-prediction accuracy (last {args.stat_sec:.0f} s)\n"
+                f"125 ms ahead: GRU {gru_5:.1f}% vs LR {lr_5:.1f}%     |     25 ms ahead: GRU {gru_1:.1f}%"
             )
         else:
-            acc_predict.set_text("채널 예측 정확도\n평가 가능한 미래 샘플을 재생하는 중 …")
+            acc_predict.set_text("Channel-prediction accuracy\nWaiting for enough future samples to evaluate...")
 
         current_forecast = pipe.forecast_at(n)
         for ru in range(3):
@@ -703,22 +703,22 @@ def run_gui(
                 oracle_ratio = summary["DQN"] / max(summary["Oracle"], 1e-9) * 100
                 random_ratio = summary["Random"] / max(summary["Oracle"], 1e-9) * 100
                 rate_title.set_text(
-                    f"최근 {args.stat_sec:.0f}s · DQN/오라클 {oracle_ratio:.0f}% · "
-                    f"최선 선택 {summary['best_ratio'] * 100:.0f}% · 핸드오버 {summary['handover']:.2f}/구간"
+                    f"Last {args.stat_sec:.0f}s | DQN/Oracle {oracle_ratio:.0f}% | "
+                    f"Best selection {summary['best_ratio'] * 100:.0f}% | Handovers {summary['handover']:.2f}/segment"
                 )
                 acc_schedule.set_text(
-                    f"RU 선택 정확도 · DQN (최근 {args.stat_sec:.0f} s)\n"
-                    f"최선 RU 맞힘 {summary['best_ratio'] * 100:.0f} % · "
-                    f"전송률 오라클의 {oracle_ratio:.0f} % (무작위 {random_ratio:.0f} %)"
+                    f"RU-selection accuracy | DQN (last {args.stat_sec:.0f} s)\n"
+                    f"Best-RU match {summary['best_ratio'] * 100:.0f}% | "
+                    f"Rate {oracle_ratio:.0f}% of Oracle (Random {random_ratio:.0f}%)"
                 )
         else:
-            acc_schedule.set_text("RU 선택 정확도\n첫 100 ms 세그먼트를 재생하는 중 …")
+            acc_schedule.set_text("RU-selection accuracy\nWaiting for the first 100 ms segment...")
 
-        status = "재생" if state["playing"] else "일시정지"
+        status = "Playing" if state["playing"] else "Paused"
         scale_label = "auto" if scale_source == "auto" else ("pre-scaled X" if scale_source == "pre-scaled X" else Path(scale_source).name)
         representation_label = "legacy X6" if pipe.duplicate_rus else "preserve X3"
         title.set_text(
-            f"D-MIMO 데이터셋 데모 — {dataset.name} · {n * hc.DT:6.2f}/{len(pipe.x) * hc.DT:.2f} s · "
+            f"D-MIMO Dataset Demo | {dataset.name} | {n * hc.DT:6.2f}/{len(pipe.x) * hc.DT:.2f} s | "
             f"{status} · scale {scale:.3g} ({scale_label}, {representation_label}) · Space/←/→/R/Q"
         )
         return []
